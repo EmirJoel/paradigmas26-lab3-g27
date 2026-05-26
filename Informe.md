@@ -64,12 +64,13 @@ estadísticas         Analyzer.detectEntities(combinedText,EntityDir)
                 |                       |
                 v                       v
  Map[(String,String),Int]     Map[String,Int]
-                |
+                |                       |
+                v                       |
+      formatEntityStats            formatTypeStats
+                |                       |
+                |-----------------------|               
                 v
-      formatEntityStats
-                |
-                v
-             Output
+             Imprime salida
 # (b)(Tizi)
 
 # (c)(Pato)
