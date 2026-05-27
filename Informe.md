@@ -4,73 +4,27 @@
 * Simonian, Fabrizio Joaquin
 * Wortley, Tiziano Angel
 
-# (a)(Emir)
-main(args: Array[String])
-    |
-    v
-CommandLineArgs.parse(args)
-    |
-    v
-Option[CommandLineArgs]
-    |
-    v
-readSubscriptions(cmdArgs.subscriptionFile)
-    |
-    v
-List[Option[Subscription]]
-    |
-    v
-flatten
-    |
-    v
-List[Subscription]
-    |
-    v
-FileIO.downloadFeed(subscription.url)
-    |
-    v
-Option[String]
-    |
-    v
-JsonParser.parsePosts(json)
-    |
-    v
-List[Post]
-    |
-    v
-flatMap
-    |
-    v
-List[Post]
-    |
-    v
-filterEmptyPosts
-    |
-    v
-List[Post]
-    |
-    +----------------------+
-    |                      |
-    v                      v
-estadísticas         Analyzer.detectEntities(combinedText,EntityDir)
-                            |
-                            v
-                    List[NamedEntity]
-                            |
-                +-----------+-----------+
-                |                       |
-                v                       v
-         countEntities           countByType
-                |                       |
-                v                       v
- Map[(String,String),Int]     Map[String,Int]
-                |                       |
-                v                       |
-      formatEntityStats            formatTypeStats
-                |                       |
-                |-----------------------|               
-                v
-             Imprime salida
+### Flujo del Programa
+```mermaid
+graph TD
+  A[main] -->|args| B[CommandLineArgs.parse]
+  B --> |Option-CommandLineArgs| C[FileIO.readSubscriptions]
+  C --> |List_Option_Subscription|D[.flatten]
+  D --> |List_Subscription|E[FileIO.downloadFeed]
+  E --> |Option_String|F[JsonParser.parsePosts]
+  F --> |List_Post|H[CalculateStats]
+  H --> |List_Post|Hn{Process}
+  Hn --> |Map_String,Int|HA[PrepEstadisticas]
+  HA --> |Map_String,Int|HB[Formatters.formatProcessingStats]
+  Hn --> Ha[Dictionary.loadAll]
+  Ha --> |Option_List_NamedEntity|Hc[Analyzer.detectEntities]
+  Hc --> |List_NamedEntity|Hd{Count}
+  Hd --> |Entities| Id[Formatters.formatEntityStats]
+  Hd --> |ByType| Jd[Formatters.formatTypeStats]
+  Id --> ZZ[Impresion]
+  Jd --> ZZ[Impresion]
+  HB --> ZZ[Impresion]
+```
 # (b)(Tizi)
 
 # (c)(Pato)
