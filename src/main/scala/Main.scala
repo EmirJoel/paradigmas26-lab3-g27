@@ -1,5 +1,14 @@
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.rdd.RDD
+
 object Main {
   def main(args: Array[String]): Unit = {
+    val spark = SparkSession.builder()
+      .appName("RedditNER")
+      .master("local[*]")
+      .getOrCreate()
+    val sc = spark.sparkContext
+
     // Parse command-line arguments
     val cmdArgs = CommandLineArgs.parse(args) match {
       case Some(parsed) => parsed
