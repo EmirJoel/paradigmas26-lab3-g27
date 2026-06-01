@@ -49,7 +49,16 @@ object Main {
     val postsRDD = subscriptionRDD.flatMap { subscription => 
       try {
         val feedOpt = FileIO.downloadFeed(subscription.url)
-        val posts = feedOpt.fold(List[Post]())(JsonParser.parsePosts(_, subscription.name))
+        // Try parsing posts, if fails log a warning and return empty list for this subscription
+        val posts = feedOpt.fold(List[Post]()) { jsonContent =>
+          try {
+            JsonParser.parsePosts(jsonContent, subscription.name)
+          } catch {
+            case _: Exception =>
+              println(s"Warning: Failed to parse posts from ${subscription.name}' (${subscription.url})")
+              List.empty[Post]
+          }
+        }
         Analyzer.filterEmptyPosts(posts)
       } catch {
         case _: Exception => 
@@ -85,6 +94,13 @@ object Main {
     // Print output
     println(Formatters.formatProcessingStats(stats))
     println()
+
+    // Check if entities directory exists before loading dictionaries
+    val dirFile = new java.io.File(cmdArgs.entitiesDir)
+    if (!dirFile.exists() || !dirFile.isDirectory) {
+      println(s"Error: entities directory '${cmdArgs.entitiesDir}' not found")
+      return
+    }
 
     // Load dictionaries (Ejercicio 3 sigue desde aca)
     val dictionary = Dictionary.loadAll(cmdArgs.entitiesDir)
