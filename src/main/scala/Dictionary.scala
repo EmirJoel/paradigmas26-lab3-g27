@@ -7,7 +7,7 @@ object Dictionary {
    * @return Option containing list of entities, None if file missing
    */
   def loadFromFile(filePath: String, entityType: String): Option[List[NamedEntity]] = {
-    FileIO.readDictionaryFile(filePath).map { lines =>
+    val result = FileIO.readDictionaryFile(filePath).map { lines =>
       lines.map { name =>
         entityType match {
           case "Person"              => new Person(name)
@@ -20,6 +20,11 @@ object Dictionary {
         }
       }
     }
+
+    if (result.isEmpty) {
+      println(s"Warning: Could not load $filePath")
+    }
+    result
   }
 
   /**

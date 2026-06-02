@@ -24,8 +24,7 @@ object JsonParser {
       }
     } catch {
       case _: Exception =>
-        println(s"Warning: Failed to parse JSON from '$subscriptionName'")
-        List()
+        throw new RuntimeException("Json parsing failed")
     }
   }
 }
