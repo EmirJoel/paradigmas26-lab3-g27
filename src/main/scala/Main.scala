@@ -83,6 +83,12 @@ object Main {
     // Load dictionaries (Ejercicio 3 sigue desde aca)
     val dictionary = Dictionary.loadAll(cmdArgs.entitiesDir)
 
+    if (dictionary.isEmpty) {
+      println("Error: No entities loaded from dictionaries")
+      spark.stop()
+      return
+    }
+
     val dictionaryBroadcast = sc.broadcast(dictionary)
     
     // a) Extraer entidades de título y cuerpo en paralelo en los Workers
@@ -106,13 +112,6 @@ object Main {
       .sortByKey(ascending = false) 
       .collect() // Única acción que trae los datos finales calculados al Driver
 
-
-   // Validar si bajaron datos antes de formatear
-    if (sortedResults.isEmpty) {
-      println("Error: No entities found or downloaded posts are empty")
-      spark.stop()
-      return
-    }
 
     // ========================================================================
     // COMODATO DE DATOS PARA FORMATEADORES (Post-Cómputo Distribuido)
