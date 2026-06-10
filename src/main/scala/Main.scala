@@ -93,6 +93,17 @@ object Main {
           List.empty[Post]
       }
     }.cache()
+
+
+    val postStartTime = System.currentTimeMillis()
+
+    postsRDD.count()
+
+    val postEndTime = System.currentTimeMillis()
+
+    val postDuration =
+      (postEndTime - postStartTime) / 1000.0
+
    // Check if entities directory exists before loading dictionaries
     val dirFile = new java.io.File(cmdArgs.entitiesDir)
     if (!dirFile.exists() || !dirFile.isDirectory) {
@@ -127,12 +138,18 @@ object Main {
     // c) Reducir de forma distribuida sumando las apariciones (Shuffle)
     val countsRDD = pairsRDD.reduceByKey((contador1, contador2) => contador1 + contador2)
 
+    val startPipelineTime = System.currentTimeMillis()
+
     // d) Ordenar globalmente de mayor a menor y recolectar los resultados refinados
     val sortedResults = countsRDD
       .map { case ((tipo, nombre), count) => (count, (tipo, nombre)) }
       .sortByKey(ascending = false) 
       .collect() // Única acción que trae los datos finales calculados al Driver
 
+    val endPipelineTime = System.currentTimeMillis()
+
+    val pipelineDuration =
+      (endPipelineTime - startPipelineTime) / 1000.0
 
     // ========================================================================
     // COMODATO DE DATOS PARA FORMATEADORES (Post-Cómputo Distribuido)
@@ -163,7 +180,10 @@ object Main {
     // ========================================================================
     // IMPRESIONES FINALES EN CONSOLA
     // ========================================================================
-    
+    println(f"Posts loading time: $postDuration%.2f seconds")
+
+    println(f"Pipeline execution time: $pipelineDuration%.2f seconds")
+
     // 1. Estadísticas Generales de Procesamiento (Pendiente completar Ejercicio 4)
     println(Formatters.formatProcessingStats(stats))
     println()
