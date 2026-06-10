@@ -1,4 +1,6 @@
-abstract class NamedEntity(val text: String) {
+// La razon de la inclusión de Serializable en NamedEntity porque en la arquitectura de Spark los datos y las clausuras de código deben viajar por la red entre el Driver y los Workers
+
+abstract class NamedEntity(val text: String) extends Serializable {
   def entityType: String
 
   def describe: String = s"[$entityType] $text"
