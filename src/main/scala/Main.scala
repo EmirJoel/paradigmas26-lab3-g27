@@ -12,7 +12,9 @@ object Main {
     // Parse command-line arguments
     val cmdArgs = CommandLineArgs.parse(args) match {
       case Some(parsed) => parsed
-      case None => return // scopt prints error messages
+      case None => 
+        spark.stop()
+        return // scopt prints error messages
     }
 
     // Load subscriptions and handle errors
@@ -21,9 +23,11 @@ object Main {
     } catch {
       case _: java.io.FileNotFoundException =>
         println(s"Error: Could not load ${cmdArgs.subscriptionFile} file not found")
+        spark.stop()
         return
       case _: org.json4s.ParserUtil.ParseException | _: Exception =>
         println(s"Error: Could not load ${cmdArgs.subscriptionFile} invalid JSON format")
+        spark.stop()
         return
     }
 
@@ -39,6 +43,7 @@ object Main {
     // Check if there are any valid subscriptions to process
     if (subscriptions.isEmpty) {
       println("Error: No valid subscriptions found")
+      spark.stop()
       return
     }
 
@@ -71,6 +76,7 @@ object Main {
     val dirFile = new java.io.File(cmdArgs.entitiesDir)
     if (!dirFile.exists() || !dirFile.isDirectory) {
       println(s"Error: entities directory '${cmdArgs.entitiesDir}' not found")
+      spark.stop()
       return
     }
 
@@ -104,6 +110,7 @@ object Main {
    // Validar si bajaron datos antes de formatear
     if (sortedResults.isEmpty) {
       println("Error: No entities found or downloaded posts are empty")
+      spark.stop()
       return
     }
 
@@ -141,5 +148,7 @@ object Main {
     println(Formatters.formatTypeStats(typeStats))
     println()
     println(Formatters.formatEntityStats(finalEntityCounts, cmdArgs.topK))
+  
+    spark.stop()
   }
 }
