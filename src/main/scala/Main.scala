@@ -8,6 +8,16 @@ object Main {
       .master("local[*]")
       .getOrCreate()
     val sc = spark.sparkContext
+    // Inicializa Acumuladores
+    val feedsSuccessAcc  = sc.longAccumulator("feedsSuccess")
+    val feedsFailedAcc   = sc.longAccumulator("feedsFailed")
+
+    val postsSuccessAcc  = sc.longAccumulator("postsSuccess")
+    val postsFailedAcc   = sc.longAccumulator("postsFailed")
+
+    val postsFilteredAcc = sc.longAccumulator("postsFiltered")
+
+    val totalCharsAcc    = sc.longAccumulator("totalChars")
 
     // Parse command-line arguments
     val cmdArgs = CommandLineArgs.parse(args) match {
@@ -49,29 +59,40 @@ object Main {
 
     // Parallelize subscriptions for Spark processing
     val subscriptionRDD = sc.parallelize(subscriptions)
-
-    // Download feeds and parse posts
-    val postsRDD = subscriptionRDD.flatMap { subscription => 
+    val postsRDD = subscriptionRDD.flatMap { subscription =>
       try {
         val feedOpt = FileIO.downloadFeed(subscription.url)
-        // Try parsing posts, if fails log a warning and return empty list for this subscription
-        val posts = feedOpt.fold(List[Post]()) { jsonContent =>
-          try {
-            JsonParser.parsePosts(jsonContent, subscription.name)
-          } catch {
-            case _: Exception =>
-              println(s"Warning: Failed to parse posts from ${subscription.name}' (${subscription.url})")
-              List.empty[Post]
-          }
+        feedOpt match {
+          case Some(jsonContent) =>
+            feedsSuccessAcc.add(1)
+            val posts =
+              try {
+                JsonParser.parsePosts(jsonContent, subscription.name)
+              } catch {
+                case _: Exception =>
+                  postsFailedAcc.add(1)
+                  println(s"Warning: Failed to parse posts from ${subscription.name} (${subscription.url})")
+                  List.empty[Post]
+              }
+            postsSuccessAcc.add(posts.size)
+            val filteredPosts = Analyzer.filterEmptyPosts(posts)
+            postsFilteredAcc.add(posts.size - filteredPosts.size)
+            filteredPosts.foreach { post =>
+              totalCharsAcc.add((post.title + post.selftext).length
+              )
+            }
+            filteredPosts
+          case None =>
+            feedsFailedAcc.add(1)
+            List.empty[Post]
         }
-        Analyzer.filterEmptyPosts(posts)
       } catch {
-        case _: Exception => 
+        case _: Exception =>
+          feedsFailedAcc.add(1)
           println(s"Warning: Failed to download from '${subscription.name}' (${subscription.url})")
           List.empty[Post]
       }
-    }
-   
+    }.cache()
    // Check if entities directory exists before loading dictionaries
     val dirFile = new java.io.File(cmdArgs.entitiesDir)
     if (!dirFile.exists() || !dirFile.isDirectory) {
@@ -96,7 +117,7 @@ object Main {
       val combinedText = post.title + " " + post.selftext
       val entitiesList = Analyzer.detectEntities(combinedText, dictionaryBroadcast.value)
       entitiesList.iterator 
-    }
+    }.cache()
 
     // b) Mapear a par clave-valor ((tipo, nombre), 1)
     val pairsRDD = entitiesRDD.map { entity =>
@@ -124,15 +145,19 @@ object Main {
     val finalEntitiesList = sortedResults.flatMap { case (count, (tipo, nombre)) => List.fill(count)((tipo, nombre)) }
     val typeStats = finalEntitiesList.groupBy(_._1).view.mapValues(_.size).toMap + ("total" -> finalEntitiesList.length)
 
-    // TODO (Ejercicio 4): Reemplazar este mapa provisional por los Accumulators reales
-    // Dejamos este placeholder fijo para que compile y mantenga el diseño de la cátedra
+    val avgChars =
+      if (postsSuccessAcc.value > 0)
+        totalCharsAcc.value / postsSuccessAcc.value
+      else
+        0
+
     val stats = Map(
-      "feedsSuccess"  -> 0,
-      "feedsFailed"   -> 0,
-      "postsSuccess"  -> finalEntitiesList.length, // Estimación temporal basada en el conteo final
-      "postsFailed"   -> 0,
-      "postsFiltered" -> 0,
-      "avgChars"      -> 1110                      // Valor promedio hardcodeado temporalmente
+      "feedsSuccess"  -> feedsSuccessAcc.value.toInt,
+      "feedsFailed"   -> feedsFailedAcc.value.toInt,
+      "postsSuccess"  -> postsSuccessAcc.value.toInt,
+      "postsFailed"   -> postsFailedAcc.value.toInt,
+      "postsFiltered" -> postsFilteredAcc.value.toInt,
+      "avgChars"      -> avgChars.toInt
     )
 
     // ========================================================================
