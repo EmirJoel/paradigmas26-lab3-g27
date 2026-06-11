@@ -8,6 +8,8 @@ object Main {
       .master("local[*]")
       .getOrCreate()
     val sc = spark.sparkContext
+    sc.setLogLevel("ERROR") // Silenciamos los logs informativos
+    
     // Inicializa Acumuladores
     val feedsSuccessAcc  = sc.longAccumulator("feedsSuccess")
     val feedsFailedAcc   = sc.longAccumulator("feedsFailed")
@@ -92,7 +94,7 @@ object Main {
           println(s"Warning: Failed to download from '${subscription.name}' (${subscription.url})")
           List.empty[Post]
       }
-    }.cache()
+    }.cache() // Cache ya que vamos a usar postsRDD mas adelante
 
 
     val postStartTime = System.currentTimeMillis()
@@ -124,20 +126,23 @@ object Main {
     val dictionaryBroadcast = sc.broadcast(dictionary)
     
     // a) Extraer entidades de título y cuerpo en paralelo en los Workers
+    // No se llama .cache() aquí porque entitiesRDD se usa una sola vez (para crear pairsRDD)
     val entitiesRDD = postsRDD.flatMap { post =>
       val combinedText = post.title + " " + post.selftext
       val entitiesList = Analyzer.detectEntities(combinedText, dictionaryBroadcast.value)
       entitiesList.iterator 
-    }.cache()
+    }
 
     // b) Mapear a par clave-valor ((tipo, nombre), 1)
+    // No se llama .cache() aquí porque pairsRDD se usa una sola vez (para crear countsRDD)
     val pairsRDD = entitiesRDD.map { entity =>
       ((entity.entityType, entity.text), 1)
     }
 
     // c) Reducir de forma distribuida sumando las apariciones (Shuffle)
+    // No se llama .cache() aquí porque countsRDD se usa una sola vez (para crear sortedResults)
     val countsRDD = pairsRDD.reduceByKey((contador1, contador2) => contador1 + contador2)
-
+    
     val startPipelineTime = System.currentTimeMillis()
 
     // d) Ordenar globalmente de mayor a menor y recolectar los resultados refinados
@@ -145,22 +150,22 @@ object Main {
       .map { case ((tipo, nombre), count) => (count, (tipo, nombre)) }
       .sortByKey(ascending = false) 
       .collect() // Única acción que trae los datos finales calculados al Driver
+    
+    postsRDD.unpersist() // Se libera memoria luego del último uso de postsRDD
 
     val endPipelineTime = System.currentTimeMillis()
 
     val pipelineDuration =
       (endPipelineTime - startPipelineTime) / 1000.0
-
-    // ========================================================================
-    // COMODATO DE DATOS PARA FORMATEADORES (Post-Cómputo Distribuido)
-    // ========================================================================
     
     // Convertimos sortedResults al formato Map[(String, String), Int] que espera formatEntityStats
     val finalEntityCounts = sortedResults.map { case (count, (tipo, nombre)) => ((tipo, nombre), count) }.toMap
 
-    // Re-expandimos localmente en el Driver para calcular las estadísticas por tipo de categoría
-    val finalEntitiesList = sortedResults.flatMap { case (count, (tipo, nombre)) => List.fill(count)((tipo, nombre)) }
-    val typeStats = finalEntitiesList.groupBy(_._1).view.mapValues(_.size).toMap + ("total" -> finalEntitiesList.length)
+    // Calculamos las estadisticas por tipo de categoria sin expandir innecesariamente
+    val typeStats = sortedResults
+      .groupBy { case (_, (tipo, _)) => tipo }
+      .view.mapValues { group => group.map(_._1).sum }
+      .toMap + ("total" -> sortedResults.map(_._1).sum)
 
     val avgChars =
       if (postsSuccessAcc.value > 0)
