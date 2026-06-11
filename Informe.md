@@ -64,3 +64,34 @@ Para que las funciones anónimas proporcionadas a las transformaciones de Spark 
 2. **Ausencia de estado compartido mutable:** Los *Workers* ejecutan las tareas asignadas en espacios de memoria (JVMs) que están totalmente aislados entre sí. Si una función intenta modificar una variable mutable externa declarada en el *Driver* (por ejemplo, un contador de tipo `var`), cada *Worker* estará alterando únicamente una copia local e independiente de la variable. El programa principal en el *Driver* nunca verá reflejadas estas modificaciones. Para consolidar métricas de forma segura desde los *Workers*, se requiere la utilización de herramientas nativas del framework como los *Accumulators*.
 
 3. **Carencia de efectos secundarios (Funciones Puras):** Spark delega la tolerancia a fallos en el reintento de tareas. Si un nodo de cómputo sufre una caída, Spark simplemente reasigna la ejecución de ese fragmento de datos a otro *Worker* disponible. Debido a esto, la función provista a una transformación de datos podría ejecutarse múltiples veces sobre el mismo input. Por ende, es una restricción indispensable que el comportamiento sea puro e idempotente, evitando efectos secundarios externos no controlados (como escrituras directas en archivos locales o inserciones en bases de datos externas), para no introducir duplicaciones o inconsistencias en el estado global.
+
+
+
+## Respuestas del Ejercicio 3
+
+### 1. `reduceByKey` como barrera de sincronización
+
+* **¿Qué ocurre en el cluster en ese punto?**
+  `reduceByKey` actua como una barrera de sincronizacion porque introduce una etapa de **Shuffle** (redistribucion). Antes de transferir datos por la red, Spark ejecuta una reduccion local inteligente en cada Worker para achicar el volumen de datos. Sin embargo, para obtener el conteo global final, todas las tuplas que compartan la misma clave exacta `(tipo, nombre)` deben ser enviadas a traves de la red hacia un unico Worker de destino, el cual es asignado mediante una funcion de *Hashing*. Ningun nodo puede avanzar a la siguiente etapa del pipeline (`sortByKey`) hasta que todas las particiones locales hayan terminado de procesarse, transmitido sus datos y completado la reduccion global en los nodos asignados.
+
+* **¿Por que es inevitable para este problema?**
+  Es inevitable porque el RDD de entrada (los posts de Reddit) esta particionado y distribuido aleatoriamente en el cluster. Como una misma entidad puede aparecer de forma simultanea en posts procesados por diferentes Workers, es matematicamente imposible calcular el gran total de ocurrencias sin centralizar y unificar los subtotales de esa clave en un mismo espacio de memoria fisica antes de la accion final.
+
+### 2. Restricciones de la funcion pasada a `reduceByKey`
+
+La funcion lambda que se le pasa a `reduceByKey` (en nuestro desarrollo: `(contador1, contador2) => contador1 + contador2`) toma dos valores y devuelve uno del mismo tipo. Para garantizar el determinismo en un entorno distribuido y asincronico, debe cumplir con dos restricciones algebraicas estrictas:
+
+* **Asociatividad $(a + b) + c = a + (b + c)$:** Permite que Spark agrupe y reduzca los valores en cualquier orden jerarquico. Esto es fundamental para que la reducción local (en el Worker) y la reducción global (post-shuffle) produzcan exactamente el mismo resultado final.
+* **Conmutatividad $a + b = b + a$:** Permite que Spark procese las tuplas en el orden fisico en que vayan llegando a traves de la red a la memoria del Worker asignado, sin importar cual se emitio primero.
+
+Si la funcion careciera de estas propiedades, el resultado del conteo variaria en cada ejecucion dependiendo netamente de la latencia de la red o del orden de las particiones.
+
+### 3. Lectura del diccionario de entidades
+
+* **¿Dónde se hace la lectura?**
+  La lectura fisica del sistema de archivos mediante el metodo `Dictionary.loadAll` se realiza **unicamente en el Driver** (en el hilo principal secuencial de la JVM central).
+
+* **¿Como interactúan el Driver y los Workers?**
+  El RDD de posts se particiona y delega de manera normal: a cada particion le corresponde una tarea (*Task*) que se envia a los Workers. Sin embargo, para que los Workers puedan consumir el diccionario dentro del `flatMap` sin saturar la red, el Driver utiliza la optimización **`sc.broadcast(dictionary)`**. 
+  
+  Spark toma el diccionario completo del Driver y lo distribuye hacia la memoria RAM de cada **Worker** *una sola vez por nodo* utilizando un protocolo eficiente de par a par (P2P tipo Torrent). El Driver no necesita coordinar que partes del diccionario se activan; los Workers son totalmente autonomos. A medida que procesan los textos de sus respectivas particiones, el propio contenido de los posts "activa" las consultas locales al diccionario residente en cache mediante `.value`, evitando la sobrecarga critica de empaquetar y transmitir el diccionario completo adjunto en cada *Task* individual.
