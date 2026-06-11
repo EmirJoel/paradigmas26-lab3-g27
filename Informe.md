@@ -95,3 +95,78 @@ Si la funcion careciera de estas propiedades, el resultado del conteo variaria e
   El RDD de posts se particiona y delega de manera normal: a cada particion le corresponde una tarea (*Task*) que se envia a los Workers. Sin embargo, para que los Workers puedan consumir el diccionario dentro del `flatMap` sin saturar la red, el Driver utiliza la optimización **`sc.broadcast(dictionary)`**. 
   
   Spark toma el diccionario completo del Driver y lo distribuye hacia la memoria RAM de cada **Worker** *una sola vez por nodo* utilizando un protocolo eficiente de par a par (P2P tipo Torrent). El Driver no necesita coordinar que partes del diccionario se activan; los Workers son totalmente autonomos. A medida que procesan los textos de sus respectivas particiones, el propio contenido de los posts "activa" las consultas locales al diccionario residente en cache mediante `.value`, evitando la sobrecarga critica de empaquetar y transmitir el diccionario completo adjunto en cada *Task* individual.
+
+## Ejercicio 4 — Monitoreo del éxito de las tareas
+
+### ¿Por qué los Accumulators solo deben usarse para métricas y no para tomar decisiones lógicas dentro de las etapas distribuidas del pipeline? ¿En qué situación un Accumulator puede dar un valor incorrecto?
+
+Los Accumulators deben utilizarse únicamente para métricas porque Spark puede ejecutar una misma tarea más de una vez (por ejemplo, ante un fallo o una recomputación). Por eso, su valor no es adecuado para tomar decisiones lógicas dentro de las transformaciones distribuidas.
+
+En nuestro código los usamos correctamente para contar estadísticas:
+
+```scala
+feedsSuccessAcc.add(1)
+postsFilteredAcc.add(posts.size - filteredPosts.size)
+```
+
+y luego leemos sus valores desde el driver para mostrarlos por pantalla.
+
+Un Accumulator puede dar un valor incorrecto si una tarea se ejecuta dos veces. Por ejemplo, si un worker descarga un feed, ejecuta:
+
+```scala
+feedsSuccessAcc.add(1)
+```
+
+si luego falla antes de terminar, Spark puede volver a ejecutar la tarea. En ese caso el contador podría incrementarse dos veces para un mismo feed, produciendo un sobreconteo. Por eso los Accumulators son útiles para monitoreo y estadísticas, pero no para controlar el flujo lógico del programa.
+
+---
+
+### ¿En qué momento del pipeline está disponible el valor de un Accumulator para ser leído por el driver?
+
+El valor de un Accumulator está disponible para ser leído por el driver una vez que se ejecuta una acción y las tareas correspondientes han finalizado. Antes de eso, las transformaciones de Spark son *lazy* y todavía no se ejecutó ningún trabajo.
+
+En nuestro código, los acumuladores se actualizan dentro de:
+
+```scala
+val postsRDD = subscriptionRDD.flatMap { ... }
+```
+
+pero sus valores recién son confiables después de una acción como:
+
+```scala
+val totalPosts = postsRDD.count()
+```
+
+o
+
+```scala
+val sortedResults = countsRDD.collect()
+```
+
+Por eso leemos:
+
+```scala
+feedsSuccessAcc.value
+postsSuccessAcc.value
+postsFilteredAcc.value
+```
+
+al final del programa, después de que las acciones terminales hayan ejecutado el pipeline. Antes de una acción, los acumuladores todavía pueden valer 0 o no reflejar todo el trabajo realizado.
+
+---
+
+### Comparación de tiempos entre la versión secuencial y la versión con Spark
+
+Utilizando las mismas suscripciones y ejecutando ambas versiones en la misma computadora y bajo la misma conexión de red, se obtuvieron los siguientes tiempos:
+
+| Etapa | Versión Spark | Versión secuencial |
+|---------|---------|---------|
+| Descarga y carga de posts | 5.67 s | 15.12 s |
+| Procesamiento NER | 0.90 s | 0.08 s |
+![ProgSpark](./ImgInforme/ProgSpark.png) ![ProgSecuencial](./ImgInforme/ProgSecuencial.png)
+
+La descarga y carga de posts fue considerablemente más rápida con Spark (5.67 s frente a 15.12 s), ya que los feeds se descargan en paralelo utilizando varios workers.
+
+En cambio, el procesamiento NER fue más lento con Spark (0.90 s frente a 0.08 s) debido al overhead propio de la ejecución distribuida, como la planificación de tareas, la serialización de datos y la coordinación entre procesos.
+
+Dado que el volumen de datos procesado es pequeño (75 posts), el costo adicional de Spark supera los beneficios del paralelismo en esta etapa. Por lo tanto, las ventajas de Spark se observan principalmente en tareas de entrada/salida (I/O), mientras que para el procesamiento de entidades en este conjunto de datos no se aprecia una mejora de rendimiento.
