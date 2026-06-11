@@ -6,24 +6,22 @@
 
 ### Flujo del Programa
 ```mermaid
-graph TD
-  A[main] -->|args| B[CommandLineArgs.parse]
-  B --> |Option-CommandLineArgs| C[FileIO.readSubscriptions]
-  C --> |List_Option_Subscription|D[.flatten]
-  D --> |List_Subscription|E[FileIO.downloadFeed]
-  E --> |Option_String|F[JsonParser.parsePosts]
-  F --> |List_Post|H[CalculateStats]
-  H --> |List_Post|Hn{Process}
-  Hn --> |Map_String,Int|HA[PrepEstadisticas]
-  HA --> |Map_String,Int|HB[Formatters.formatProcessingStats]
-  Hn --> Ha[Dictionary.loadAll]
-  Ha --> |Option_List_NamedEntity|Hc[Analyzer.detectEntities]
-  Hc --> |List_NamedEntity|Hd{Count}
-  Hd --> |Entities| Id[Formatters.formatEntityStats]
-  Hd --> |ByType| Jd[Formatters.formatTypeStats]
-  Id --> ZZ[Impresion]
-  Jd --> ZZ[Impresion]
-  HB --> ZZ[Impresion]
+  graph TD 
+  A[DRIVER] --> B[readSubscriptions] 
+  B -->|List-Option-Subscription| C[flatten] 
+  C -->|List-Subscription| D[sc.parallelize] 
+  D -->|RDD_Subscription| E{WORKERS} 
+  E --> F[flatMap_Download + parse] 
+  F -->|RDD_Post|G[filterEmptyPosts] 
+  G -->|RDD_Post|H[flatMap.DetectEntities] 
+  H -->|RDD_NamedEntity|I[map.entity==tipo,nombre-1] 
+  I -->|RDD_String,String-Int|J[reduceByKey _ + _] 
+  J -->|RDD_String,String-Int|K[map_count -- count,, tipo,nombre] 
+  K -->|RDD_Int-String,String| L[sortByKey] 
+  L -->|RDD_Int-String,String| M{.collect} 
+  M -->|Array_Int-String,String| N[DRIVER] 
+  N --> O[FormatTypeStats y FormatEntityStats] 
+  O --> P[--Impresion--]
 ```
 ### (b)Abstracciones de Spark para cada paso del pipeline
 A continuacion se analiza cada componente de nuestro pipeline secuencial anterior y su correspondencia con las abstracciones de Apache Spark para el procesamiento distribuido:
