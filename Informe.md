@@ -51,7 +51,15 @@ A continuacion se analiza cada componente de nuestro pipeline secuencial anterio
 
 -Por que: El ordenamiento es una operacion global que rompe la independencia de los Workers. Requiere comparar absolutamente todos los elementos del dataset entre sí para determinar su posicion jerarquica final, lo que implica una redistribucion masiva de los datos a traves de la red (operación de shuffle mediante un ordenamiento global como sortByKey).
 
-# (c)(Pato)
+### (c) Barreras de sincronizacion y workers independientes
+Algunos de los pasos independientes en los que cada Worker trabaja con su particion sin necesitar a los demas son:
+- **flatMap**: Cada Worker descarga sus URLs y analiza sus posts con copia local sin importarle lo que hacen los demas.
+- **map**: Transformaciones elemento a elemento en cada Worker puramente locales.
+En cambio, algunas de las barreras de sincronizacion estan dadas por:
+- **count**: El Driver espera que todos los Workers terminen de procesar y reportar antes de leer los acumuladores. Por ejemplo, si leyeras feedsSuccessAcc.value antes de que algún Worker termine, el valor estaría incompleto.
+- **reduceByKey**: Los Workers redistribuyen sus pares entre sí a través de la red (shuffle), garantizando que todos los pares con la misma clave (tipo, nombre) lleguen al mismo Worker. Ningún Worker puede comenzar a reducir hasta que haya recibido todos los pares de su clave provenientes de los demás Workers.
+- **sortByKey**: Spark redistribuye los pares entre Workers de forma que cada uno reciba un rango contiguo de valores (los counts más altos a uno, los más bajos a otro). Ninguno puede comenzar a ordenar su rango hasta haber recibido todos los pares que le corresponden de los demás Workers. El resultado global ordenado se obtiene concatenandolos en secuencia.
+- **collect**: Acción que actúa como barrera entre el cómputo distribuido y el Driver. El Driver no puede continuar hasta que todos los Workers hayan completado su procesamiento y transmitido la totalidad de sus particiones. El resultado final solo existe cuando cada Worker contribuyó su parte.
 
 ### (d) Restricciones sobre las funciones (Puntos de extensión) en Spark
 
@@ -168,3 +176,14 @@ La descarga y carga de posts fue considerablemente más rápida con Spark (5.67 
 En cambio, el procesamiento NER fue más lento con Spark (0.90 s frente a 0.08 s) debido al overhead propio de la ejecución distribuida, como la planificación de tareas, la serialización de datos y la coordinación entre procesos.
 
 Dado que el volumen de datos procesado es pequeño (75 posts), el costo adicional de Spark supera los beneficios del paralelismo en esta etapa. Por lo tanto, las ventajas de Spark se observan principalmente en tareas de entrada/salida (I/O), mientras que para el procesamiento de entidades en este conjunto de datos no se aprecia una mejora de rendimiento.
+
+## Respuestas del Ejercicio 5
+* **¿Qué ocurriría si no llamaran a cache()? ¿Cuántas veces se ejecutaría la descarga de feeds?**
+  Si no llamaramos a cache la descarga de feeds se realizaria 2 veces (pues postsRDD aparece en 2 acciones en el codigo), lo cual en una situacion real en donde la cantidad de posteos fuera millones de veces mayor resultaria en una perdida de tiempo y recursos significativa. Al llamar a cache luego de realizar la descarga de feeds correctamente, guardamos el resultado de la transformacion en memoria RAM, permitiendo que las posteriores transformaciones lean directamente de la cache sin necesidad de volver a ejecutar la transformacion original.
+
+* **¿Por qué es incorrecto llamar a collect() entre los pasos a) y b) del ejercicio 3 y luego continuar el pipeline? ¿Qué consecuencia tiene sobre la distribución del trabajo?**
+  Ya que al llamar a collect() estariamos trayendo todos los datos NamedEntity hacia la memoria RAM del Driver, sin embargo el proposito del ejercicio es paralelizar el computo de entidades nombradas para obtener el conteo de entidades de los feeds. 
+  La consecuencia que tiene sobre la distribucion del trabajo es que las transformaciones como map y reduceByKey dejarian de ejecutarse en los Workers y pasarian a ejecutarse en el Driver como operaciones secuenciales de colecciones Scala, perdiendo el beneficio de la paralelización.
+
+* **cache() es también lazy. ¿En qué momento se almacena realmente el RDD en memoria?**
+  Como cache tambien es lazy, a la hora de llamarlo en nuestro codigo solo marca al RDD diciendole "cuando me computes por primera vez, guarda el resultado en RAM", por lo tanto, nada se guarda de inmediato. El RDD se almacena realmente en memoria en la primera accion que se ejecuta sobre el, como seria en la linea 102 de nuestro codigo al hacer `.count()`. Una vez guardado en memoria, la posterior llamada a `postsRDD.flatMap` leera de la cache en lugar de volver a ejecutar las transformaciones.
