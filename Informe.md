@@ -55,7 +55,9 @@ A continuacion se analiza cada componente de nuestro pipeline secuencial anterio
 Algunos de los pasos independientes en los que cada Worker trabaja con su particion sin necesitar a los demas son:
 - **flatMap**: Cada Worker descarga sus URLs y analiza sus posts con copia local sin importarle lo que hacen los demas.
 - **map**: Transformaciones elemento a elemento en cada Worker puramente locales.
+
 En cambio, algunas de las barreras de sincronizacion estan dadas por:
+
 - **count**: El Driver espera que todos los Workers terminen de procesar y reportar antes de leer los acumuladores. Por ejemplo, si leyeras feedsSuccessAcc.value antes de que algún Worker termine, el valor estaría incompleto.
 - **reduceByKey**: Los Workers redistribuyen sus pares entre sí a través de la red (shuffle), garantizando que todos los pares con la misma clave (tipo, nombre) lleguen al mismo Worker. Ningún Worker puede comenzar a reducir hasta que haya recibido todos los pares de su clave provenientes de los demás Workers.
 - **sortByKey**: Spark redistribuye los pares entre Workers de forma que cada uno reciba un rango contiguo de valores (los counts más altos a uno, los más bajos a otro). Ninguno puede comenzar a ordenar su rango hasta haber recibido todos los pares que le corresponden de los demás Workers. El resultado global ordenado se obtiene concatenandolos en secuencia.
