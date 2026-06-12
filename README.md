@@ -138,20 +138,8 @@ sbt run
 ```
 *The server will be listening on `http://localhost:8123`.*
 
-**Step 2: Point subscriptions to the local environment**
-Temporarily edit the `data/valid_subscriptions.json` file and replace the real URL domains with `localhost`. 
-
-Modification example:
-```json
-{
-  "name": "Scala",
-  "url": "http://localhost:8123/r/scala/.json?count=10"
-}
-```
-*(Make sure to use `http` and not `https` for the local server).*
-
-**Step 3: Build and Run using Make**
-In a new terminal, from the root directory of the main project, use the provided Makefile to compile and launch the distributed application all at once:
+**Step 2: Build and Run in Local Mode**
+In a new terminal, from the root directory of the main project, use the provided Makefile target to automatically launch the distributed application using the pre-configured local subscriptions file (`local_subscriptions.json`):
 ```bash
-make
+make local
 ```
