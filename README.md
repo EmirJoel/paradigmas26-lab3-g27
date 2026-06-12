@@ -125,3 +125,33 @@ The system handles failures gracefully:
 - Missing individual entity files: Warns but continues with available dictionaries
 
 All errors are printed to console for visibility. The system continues processing valid data whenever possible.
+
+## Local Execution (Mock Server)
+
+Due to rate limiting on the public Reddit API, it is highly recommended to use a local mock server for intensive testing to avoid being blocked.
+
+**Step 1: Start the Mock Server**
+Open a separate terminal, navigate to the mock server directory (provided by the teaching staff), and run it:
+```bash
+cd reddit-mock
+sbt run
+```
+*The server will be listening on `http://localhost:8123`.*
+
+**Step 2: Point subscriptions to the local environment**
+Temporarily edit the `data/valid_subscriptions.json` file and replace the real URL domains with `localhost`. 
+
+Modification example:
+```json
+{
+  "name": "Scala",
+  "url": "http://localhost:8123/r/scala/.json?count=10"
+}
+```
+*(Make sure to use `http` and not `https` for the local server).*
+
+**Step 3: Build and Run using Make**
+In a new terminal, from the root directory of the main project, use the provided Makefile to compile and launch the distributed application all at once:
+```bash
+make
+```
